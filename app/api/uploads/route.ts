@@ -24,7 +24,8 @@ function isSameOrigin(req: Request): boolean {
 /**
  * POST /api/uploads — admin image upload (Architecture.md §7: file upload
  * endpoint). Multipart field "file". Validated type + 5 MB limit in
- * lib/upload; file lands under public/uploads/, metadata in `media`.
+ * lib/upload; file lands under UPLOAD_DIR/, metadata in `media`.
+ * Served back by app/uploads/[...path]/route.ts.
  */
 export async function POST(req: Request) {
   const ctx = await getAdminContext();

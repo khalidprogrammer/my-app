@@ -1,13 +1,25 @@
 import { mkdir, unlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { randomBytes } from "node:crypto";
 
 /**
- * Local upload storage for Phase 4 (Architecture.md §8 media).
- * Files live under public/uploads/YYYY/MM/; the DB keeps metadata only.
- * Swap saveUploadFile/deleteUploadFile for an S3 adapter when object
- * storage is configured — the media table already fits that model.
+ * Upload storage for Phase 4 (Architecture.md §8 media). The DB keeps metadata
+ * only; the bytes live on disk under UPLOAD_DIR/YYYY/MM/ (locally ./data/uploads).
+ *
+ * Uploads deliberately do NOT live under `public/`. Hosts that build with
+ * `output: "standalone"` (Hostinger does) run the server with its cwd inside
+ * the regenerated build directory, so anything written to `public/` is
+ * destroyed on the next deploy. Point UPLOAD_DIR at a path that survives
+ * rebuilds — e.g. /home/u123456789/uploads — and app/uploads/[...path]/route.ts
+ * serves the files. Public URLs are /uploads/... either way.
+ *
+ * Swap saveUploadFile/deleteUploadFile for an S3 adapter when object storage is
+ * configured — the media table already fits that model.
  */
+export const UPLOAD_ROOT = process.env.UPLOAD_DIR
+  ? resolve(process.env.UPLOAD_DIR)
+  : join(process.cwd(), "data", "uploads");
+
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 /** Quote attachments may include documents as well as images (Phase 5). */
@@ -31,6 +43,25 @@ export const ALLOWED_ATTACHMENT_MIME: Record<string, string> = {
   "text/csv": "csv",
   "text/plain": "txt",
 };
+
+/** One path segment, as produced by saveUploadFile: no dots, no separators. */
+const SAFE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/**
+ * Resolves a request path such as `2026/09/abc123.jpg` to an absolute path
+ * inside UPLOAD_ROOT, or null for anything this app would never have written.
+ * Only 3 or 4 segments are accepted (YYYY/MM/<file>, or <area>/YYYY/MM/<file>),
+ * which alone rules out traversal; the resolved-prefix check is defence in
+ * depth. Shared with the serving route so reads and writes agree.
+ */
+export function resolveUploadPath(relPath: string): string | null {
+  const parts = relPath.split("/");
+  if (parts.length < 3 || parts.length > 4) return null;
+  if (parts.some((p) => !SAFE_SEGMENT.test(p))) return null;
+  const abs = resolve(UPLOAD_ROOT, ...parts);
+  if (!abs.startsWith(UPLOAD_ROOT + sep)) return null;
+  return abs;
+}
 
 export type SavedUpload = {
   storageKey: string;
@@ -60,14 +91,15 @@ export async function saveUploadFile(
 
   const now = new Date();
   const dir = [
-    "uploads",
     ...(options?.subdir ? [options.subdir] : []),
     String(now.getFullYear()),
     String(now.getMonth() + 1).padStart(2, "0"),
   ];
   const name = `${randomBytes(12).toString("hex")}.${ext}`;
-  const storageKey = [...dir, name].join("/");
-  const absDir = join(process.cwd(), "public", ...dir);
+  // storageKey keeps the leading "uploads/" so stored URLs stay /uploads/...,
+  // matching every row written before this moved off the public/ directory.
+  const storageKey = ["uploads", ...dir, name].join("/");
+  const absDir = resolve(UPLOAD_ROOT, ...dir);
   await mkdir(absDir, { recursive: true });
   await writeFile(join(absDir, name), Buffer.from(await file.arrayBuffer()));
 
@@ -77,11 +109,8 @@ export async function saveUploadFile(
 /** Best-effort file removal; guarded against path traversal. */
 export async function deleteUploadFile(storageKey: string): Promise<void> {
   if (!storageKey.startsWith("uploads/")) return;
-  const parts = storageKey.split("/");
-  // Only keys we ever create: uploads/YYYY/MM/<file> or uploads/<area>/YYYY/MM/<file>.
-  if (parts.length < 3 || parts.length > 5) return;
-  if (parts.some((p) => p === "" || p === "." || p === "..")) return;
-  const fileName = parts[parts.length - 1] ?? "";
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(fileName)) return;
-  await unlink(join(process.cwd(), "public", ...parts)).catch(() => undefined);
+  // Reuse the same resolver as the serving route, minus the leading "uploads/".
+  const abs = resolveUploadPath(storageKey.slice("uploads/".length));
+  if (!abs) return;
+  await unlink(abs).catch(() => undefined);
 }

@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "build:hostinger": "prisma migrate deploy && prisma db seed && next build",
     "lint": "eslint",
     "test": "tsx --test tests/slug.test.ts tests/validations.test.ts tests/security.test.ts",
     "typecheck": "tsc --noEmit",

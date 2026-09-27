@@ -36,6 +36,8 @@ yarn-error.log*
 
 # user uploads (local storage; back up separately, never commit)
 public/uploads/
+# default UPLOAD_ROOT for local development
+/data/
 
 # vercel
 .vercel
