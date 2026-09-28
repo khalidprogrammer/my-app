@@ -4,7 +4,7 @@
  * Navigation matches Architecture.md public routes + design.md §4 header.
  */
 export const siteConfig = {
-  name: "YABHENG INTERNATIONAL TRADE .",
+  name: "YANHENG INTERNATIONAL TRADE .",
   shortName: "YanHeng",
   tagline: "Import & Export",
   description:
